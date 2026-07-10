@@ -12,6 +12,7 @@ import net.minecraft.world.entity.projectile.AbstractArrow;
 import net.minecraft.world.entity.projectile.AbstractHurtingProjectile;
 import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
+import org.joml.Quaterniond;
 import org.joml.Quaterniondc;
 import org.joml.Vector3d;
 
@@ -88,12 +89,50 @@ public class EntitySubLevelUtil {
         return !entity.getType().is(SableTags.RETAIN_IN_SUB_LEVEL);
     }
 
+    /**
+     * Entities orient to sub-levels tilted up to this angle; steeper, they stay upright.
+     */
+    private static final double MAX_SURFACE_ORIENTATION_ANGLE = Math.toRadians(45.0);
+
+    /**
+     * Below this tilt the sub-level is treated as flat and vanilla behavior applies.
+     */
+    private static final double MIN_SURFACE_ORIENTATION_ANGLE = Math.toRadians(1.0);
+
+    /**
+     * The orientation an entity standing on a tilted sub-level should adopt: the tilt (swing)
+     * component of the sub-level's orientation, with the yaw (twist about world Y) removed so the
+     * entity keeps its own heading. Returns null on flat or too-steep sub-levels, where the entity
+     * remains upright.
+     */
     @Nullable
     public static Quaterniondc getCustomEntityOrientation(final Entity entity, final float partialTicks) {
-        return null;
+        final SubLevel subLevel = Sable.HELPER.getTrackingSubLevel(entity);
+        if (subLevel == null || subLevel.isRemoved()) {
+            return null;
+        }
+
+        final Quaterniond orientation = new Quaterniond();
+        subLevel.lastPose().orientation().slerp(subLevel.logicalPose().orientation(), partialTicks, orientation);
+
+        // Swing-twist decomposition about world Y: orientation = swing * twist. The twist is the
+        // sub-level's heading, which the entity should NOT inherit; the swing is the deck tilt.
+        final Quaterniond twist = new Quaterniond(0.0, orientation.y, 0.0, orientation.w);
+        if (twist.lengthSquared() < 1.0e-12) {
+            return null; // degenerate (sub-level pitched ~180): stay upright
+        }
+        twist.normalize();
+        final Quaterniond swing = orientation.mul(twist.invert(new Quaterniond()), new Quaterniond()).normalize();
+
+        final double tilt = 2.0 * Math.acos(Math.min(1.0, Math.abs(swing.w)));
+        if (tilt < MIN_SURFACE_ORIENTATION_ANGLE || tilt > MAX_SURFACE_ORIENTATION_ANGLE) {
+            return null;
+        }
+
+        return swing;
     }
 
     public static boolean hasCustomEntityOrientation(final Entity entity) {
-        return false;
+        return getCustomEntityOrientation(entity, 1.0f) != null;
     }
 }
