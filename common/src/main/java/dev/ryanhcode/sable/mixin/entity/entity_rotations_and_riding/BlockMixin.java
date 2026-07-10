@@ -25,7 +25,18 @@ public class BlockMixin {
 
         final Vector3d up = orientation.transform(OrientedBoundingBox3d.UP, new Vector3d());
         final double dot = up.dot(instance.x, instance.y, instance.z);
-        return instance.subtract(up.x * dot, up.y * dot, up.z * dot);
+        final Vec3 tangential = instance.subtract(up.x * dot, up.y * dot, up.z * dot);
+
+        // Surface adhesion: removing only the surface-normal component leaves the tangential
+        // slice of world-frame gravity (~g*sin(tilt)) in the velocity every tick, making entities
+        // creep along inclines with no input. Landing/standing motion below a walking-impulse
+        // threshold is absorbed entirely, like vanilla's multiply(1, 0, 1) absorbs vertical falls;
+        // deliberate movement is well above the threshold and passes through.
+        if (tangential.lengthSqr() < 0.04 * 0.04) {
+            return Vec3.ZERO;
+        }
+
+        return tangential;
     }
 
 }
