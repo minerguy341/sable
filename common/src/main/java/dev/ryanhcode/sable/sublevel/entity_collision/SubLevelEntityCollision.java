@@ -453,6 +453,31 @@ public class SubLevelEntityCollision {
             }
         }
 
+        // Surface adhesion (static friction) for surface-oriented entities: standing on a tilted
+        // deck, world-frame gravity resolved along the surface normal leaves a small tangential
+        // push every tick (~g*sin(tilt)) that vanilla never needed to absorb, so entities creep
+        // along the incline forever. Absorb tangential motion below a walking-impulse threshold;
+        // deliberate movement is well above it.
+        if (collisionInfo.verticalCollisionBelow && customEntityOrientation != null) {
+            final Vector3d surfaceUp = sink.entityUpDirection;
+            final double adhesionThresholdSq = 0.04 * 0.04;
+
+            final double motionUpComponent = collisionMotion.dot(surfaceUp);
+            final double motionTangentialSq = collisionMotion.distanceSquared(
+                    surfaceUp.x() * motionUpComponent, surfaceUp.y() * motionUpComponent, surfaceUp.z() * motionUpComponent);
+            if (motionTangentialSq > 0.0 && motionTangentialSq < adhesionThresholdSq) {
+                collisionMotion.set(surfaceUp).mul(motionUpComponent);
+            }
+
+            final Vector3d deltaMovement = JOMLConversion.toJOML(entity.getDeltaMovement(), new Vector3d());
+            final double movementUpComponent = deltaMovement.dot(surfaceUp);
+            final double movementTangentialSq = deltaMovement.distanceSquared(
+                    surfaceUp.x() * movementUpComponent, surfaceUp.y() * movementUpComponent, surfaceUp.z() * movementUpComponent);
+            if (movementTangentialSq > 0.0 && movementTangentialSq < adhesionThresholdSq) {
+                entity.setDeltaMovement(JOMLConversion.toMojang(new Vector3d(surfaceUp).mul(movementUpComponent)));
+            }
+        }
+
         collisionInfo.inheritedMotion = JOMLConversion.toMojang(
                 Sable.HELPER.getFeetPos(entity, 0.0f, customEntityOrientation)
                         .sub(originalEntityFootPosition));
