@@ -35,10 +35,25 @@ public abstract class EntityRendererMixin {
     @Final
     protected EntityRenderDispatcher entityRenderDispatcher;
 
+    @Unique
+    private static int sable$lightDebugCounter;
+
     @ModifyReturnValue(method = "getPackedLightCoords", at = @At("RETURN"))
     public final int getPackedLightCoords(final int original, final Entity arg, final float f) {
         final Vec3 lightProbeOffset = arg.getLightProbePosition(f).subtract(arg.getEyePosition(f));
         final Vector3d lightProbePosition = JOMLConversion.toJOML(Sable.HELPER.getEyePositionInterpolated(arg, f)).add(lightProbeOffset.x, lightProbeOffset.y, lightProbeOffset.z);
+
+        // For surface-oriented entities, probe from the oriented BODY CENTER instead of the
+        // oriented eye: on tilted decks the tilted eye lever can lean the probe inside adjacent
+        // geometry, sampling zero light and rendering the entity black. The body center is inside
+        // the entity's own volume, hence always in open space.
+        final org.joml.Quaterniondc surfaceOrientation =
+                dev.ryanhcode.sable.api.entity.EntitySubLevelUtil.getCustomEntityOrientation(arg, f);
+        if (surfaceOrientation != null) {
+            final double centerLever = arg.getEyeHeight() - arg.getBbHeight() / 2.0;
+            final Vector3d lever = surfaceOrientation.transform(new Vector3d(0.0, centerLever, 0.0));
+            lightProbePosition.sub(lever);
+        }
         final BlockPos blockpos = BlockPos.containing(lightProbePosition.x, lightProbePosition.y, lightProbePosition.z);
         return LightTexture.pack(sable$getSubLevelAccountedBlockLight(original, arg.level(), LightLayer.BLOCK, blockpos, lightProbePosition),
                 sable$getSubLevelAccountedSkyLight(original, arg.level(), LightLayer.SKY, blockpos, lightProbePosition));
@@ -82,8 +97,30 @@ public abstract class EntityRendererMixin {
                 if (lightLayer == LightLayer.BLOCK) {
                     baseBrightness = Math.max(baseBrightness, level.getBrightness(lightLayer, localPosition));
                 } else if (lightLayer == LightLayer.SKY) {
-                    final int brightness = clientSubLevel.scaleSkyLight(level.getBrightness(lightLayer, localPosition));
-                    baseBrightness = Math.min(baseBrightness, brightness);
+                    final int rawBrightness = level.getBrightness(lightLayer, localPosition);
+                    final int brightness = clientSubLevel.scaleSkyLight(rawBrightness);
+
+                    // TEMP diagnostics for entity-blackout debugging — remove before merging.
+                    if ((sable$lightDebugCounter++ & 63) == 0) {
+                        dev.ryanhcode.sable.Sable.LOGGER.info(String.format(
+                                "[light dbg] local=%s air=%b rawSky=%d scaled=%d scale=%d base=%d aboveGround=%b probe=(%.2f,%.2f,%.2f)",
+                                localPosition,
+                                level.getBlockState(localPosition).isAir(),
+                                rawBrightness,
+                                brightness,
+                                clientSubLevel.getLatestSkyLightScale(),
+                                baseBrightness,
+                                true,
+                                probePosition.x(), probePosition.y(), probePosition.z()));
+                    }
+
+                    // A zero sky sample in an AIR block of the plot is the signature of plot light
+                    // data that simply hasn't been computed (fresh assemblies) — letting it win the
+                    // min() renders entities pitch black in broad daylight. Only darken from
+                    // samples that carry actual light information.
+                    if (brightness > 0 || !level.getBlockState(localPosition).isAir()) {
+                        baseBrightness = Math.min(baseBrightness, brightness);
+                    }
                 }
             }
         }

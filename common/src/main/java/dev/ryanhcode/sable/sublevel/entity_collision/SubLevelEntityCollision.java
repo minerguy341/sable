@@ -255,7 +255,19 @@ public class SubLevelEntityCollision {
                     sink.trackingPosition.set(entityBoundsCenter).add(feetOffset);
                     subLevelPose.transformPosition(lastSubLevelPose.transformPositionInverse(sink.trackingPosition)).sub(feetOffset, entityBoundsCenter);
                     entityBoundsCenter.add(collisionMotion, entityBoundsOBB.getPosition());
-                    entityBoundsCenter.fma(verticalAnchorPosition - entity.getBoundingBox().getYsize() / 2.0, entityUp, sink.tempEyePosition).sub(0.0, verticalAnchorPosition, 0.0);
+
+                    // Reconstruct the entity position as the exact inverse of how entityBoundsCenter
+                    // was derived from it (getAABBCenter + transformEntityBoundsCenter). The previous
+                    // reconstruction subtracted half the body height along entityUp instead, which for
+                    // custom orientations displaces the entity laterally by ~eyeHeight * sin(tilt)
+                    // EVERY tick — a phantom conveyor on any tilted surface.
+                    sink.tempEyePosition.set(entityBoundsCenter);
+                    if (customEntityOrientation != null) {
+                        final double eyeLever = entity.getEyeHeight() - entity.getBoundingBox().getYsize() / 2.0;
+                        sink.tempEyePosition.sub(0.0, eyeLever, 0.0)
+                                .add(customEntityOrientation.transform(new Vector3d(0.0, eyeLever, 0.0)));
+                    }
+                    sink.tempEyePosition.sub(0.0, entity.getBoundingBox().getYsize() / 2.0, 0.0);
                     ((EntityExtension) entity).sable$setPosSuperRaw(new Vec3(sink.tempEyePosition.x, sink.tempEyePosition.y, sink.tempEyePosition.z));
 
                     boolean anySurroundingBlocksSolid = false;
@@ -453,31 +465,6 @@ public class SubLevelEntityCollision {
             }
         }
 
-        // Surface adhesion (static friction) for surface-oriented entities: standing on a tilted
-        // deck, world-frame gravity resolved along the surface normal leaves a small tangential
-        // push every tick (~g*sin(tilt)) that vanilla never needed to absorb, so entities creep
-        // along the incline forever. Absorb tangential motion below a walking-impulse threshold;
-        // deliberate movement is well above it.
-        if (collisionInfo.verticalCollisionBelow && customEntityOrientation != null) {
-            final Vector3d surfaceUp = sink.entityUpDirection;
-            final double adhesionThresholdSq = 0.04 * 0.04;
-
-            final double motionUpComponent = collisionMotion.dot(surfaceUp);
-            final double motionTangentialSq = collisionMotion.distanceSquared(
-                    surfaceUp.x() * motionUpComponent, surfaceUp.y() * motionUpComponent, surfaceUp.z() * motionUpComponent);
-            if (motionTangentialSq > 0.0 && motionTangentialSq < adhesionThresholdSq) {
-                collisionMotion.set(surfaceUp).mul(motionUpComponent);
-            }
-
-            final Vector3d deltaMovement = JOMLConversion.toJOML(entity.getDeltaMovement(), new Vector3d());
-            final double movementUpComponent = deltaMovement.dot(surfaceUp);
-            final double movementTangentialSq = deltaMovement.distanceSquared(
-                    surfaceUp.x() * movementUpComponent, surfaceUp.y() * movementUpComponent, surfaceUp.z() * movementUpComponent);
-            if (movementTangentialSq > 0.0 && movementTangentialSq < adhesionThresholdSq) {
-                entity.setDeltaMovement(JOMLConversion.toMojang(new Vector3d(surfaceUp).mul(movementUpComponent)));
-            }
-        }
-
         collisionInfo.inheritedMotion = JOMLConversion.toMojang(
                 Sable.HELPER.getFeetPos(entity, 0.0f, customEntityOrientation)
                         .sub(originalEntityFootPosition));
@@ -494,6 +481,21 @@ public class SubLevelEntityCollision {
 
         collisionInfo.motion = JOMLConversion.toMojang(collisionMotion);
         collisionInfo.firstCollisions = firstCollisions;
+
+        // TEMP diagnostics for surface-orientation force debugging — remove before merging.
+        if (entity.level().isClientSide && entity instanceof Player && customEntityOrientation != null) {
+            final Vec3 dm = entity.getDeltaMovement();
+            Sable.LOGGER.info(String.format(
+                    "[collide dbg] in=(%.5f,%.5f,%.5f) out=(%.5f,%.5f,%.5f) inh=%s dm=(%.5f,%.5f,%.5f) up=(%.3f,%.3f,%.3f) vBelow=%b ground=%b",
+                    collisionMotionMoj.x, collisionMotionMoj.y, collisionMotionMoj.z,
+                    collisionInfo.motion.x, collisionInfo.motion.y, collisionInfo.motion.z,
+                    collisionInfo.inheritedMotion,
+                    dm.x, dm.y, dm.z,
+                    sink.entityUpDirection.x, sink.entityUpDirection.y, sink.entityUpDirection.z,
+                    collisionInfo.verticalCollisionBelow,
+                    entity.onGround()));
+        }
+
         return collisionInfo;
     }
 
