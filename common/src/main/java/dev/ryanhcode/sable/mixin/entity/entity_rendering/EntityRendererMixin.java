@@ -35,9 +35,6 @@ public abstract class EntityRendererMixin {
     @Final
     protected EntityRenderDispatcher entityRenderDispatcher;
 
-    @Unique
-    private static int sable$lightDebugCounter;
-
     @ModifyReturnValue(method = "getPackedLightCoords", at = @At("RETURN"))
     public final int getPackedLightCoords(final int original, final Entity arg, final float f) {
         final Vec3 lightProbeOffset = arg.getLightProbePosition(f).subtract(arg.getEyePosition(f));
@@ -96,31 +93,14 @@ public abstract class EntityRendererMixin {
             if (isAboveGround) {
                 if (lightLayer == LightLayer.BLOCK) {
                     baseBrightness = Math.max(baseBrightness, level.getBrightness(lightLayer, localPosition));
-                } else if (lightLayer == LightLayer.SKY) {
-                    final int rawBrightness = level.getBrightness(lightLayer, localPosition);
-                    final int brightness = clientSubLevel.scaleSkyLight(rawBrightness);
-
-                    // TEMP diagnostics for entity-blackout debugging — remove before merging.
-                    if ((sable$lightDebugCounter++ & 63) == 0) {
-                        dev.ryanhcode.sable.Sable.LOGGER.info(String.format(
-                                "[light dbg] local=%s air=%b rawSky=%d scaled=%d scale=%d base=%d aboveGround=%b probe=(%.2f,%.2f,%.2f)",
-                                localPosition,
-                                level.getBlockState(localPosition).isAir(),
-                                rawBrightness,
-                                brightness,
-                                clientSubLevel.getLatestSkyLightScale(),
-                                baseBrightness,
-                                true,
-                                probePosition.x(), probePosition.y(), probePosition.z()));
-                    }
-
-                    // A zero sky sample in an AIR block of the plot is the signature of plot light
-                    // data that simply hasn't been computed (fresh assemblies) — letting it win the
-                    // min() renders entities pitch black in broad daylight. Only darken from
-                    // samples that carry actual light information.
-                    if (brightness > 0 || !level.getBlockState(localPosition).isAir()) {
-                        baseBrightness = Math.min(baseBrightness, brightness);
-                    }
+                } else if (lightLayer == LightLayer.SKY && level.getBlockState(localPosition).isAir()) {
+                    // Only darken from a sub-level whose plot the entity's probe actually lands in
+                    // the AIR of (i.e. genuinely standing in that contraption's interior, under a
+                    // roof the heightmap scan found). When a NEIGHBORING contraption's world bounds
+                    // overlap the entity, the inverse transform drops the probe inside that
+                    // sub-level's SOLID geometry — a position the entity can't really occupy — and
+                    // its sky=0 would otherwise min() the entity to pitch black.
+                    baseBrightness = Math.min(baseBrightness, clientSubLevel.scaleSkyLight(level.getBrightness(lightLayer, localPosition)));
                 }
             }
         }

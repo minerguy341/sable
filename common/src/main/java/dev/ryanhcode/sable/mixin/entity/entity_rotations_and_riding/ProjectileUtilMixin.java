@@ -36,7 +36,8 @@ public class ProjectileUtilMixin {
     private static Optional<Vec3> sable$orientedClip(final AABB box, final Vec3 from, final Vec3 to,
                                                      final Operation<Optional<Vec3>> original,
                                                      @Local(ordinal = 1) final Entity target) {
-        final Quaterniondc orientation = EntitySubLevelUtil.getCustomEntityOrientation(target, 1.0f);
+        final Quaterniondc orientation = target == null ? null
+                : EntitySubLevelUtil.getCustomEntityOrientation(target, 1.0f);
         if (orientation == null) {
             return original.call(box, from, to);
         }

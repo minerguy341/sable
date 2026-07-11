@@ -107,6 +107,10 @@ public class EntitySubLevelUtil {
      */
     @Nullable
     public static Quaterniondc getCustomEntityOrientation(final Entity entity, final float partialTicks) {
+        if (entity == null) {
+            return null;
+        }
+
         final SubLevel subLevel = Sable.HELPER.getTrackingSubLevel(entity);
         if (subLevel == null || subLevel.isRemoved()) {
             return null;
