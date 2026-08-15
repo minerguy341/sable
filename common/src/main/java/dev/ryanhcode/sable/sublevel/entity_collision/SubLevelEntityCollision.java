@@ -207,6 +207,20 @@ public class SubLevelEntityCollision {
                 lastPose.lerp(logicalPose, (double) (i - 1) / substeps, lastSubLevelPose);
                 lastPose.lerp(logicalPose, (double) (i) / substeps, subLevelPose);
 
+                // Re-orient the entity's collision box to THIS sub-level's pose at THIS substep.
+                // The computation before the loop reads subLevelPose before it has been set for the
+                // current iteration, so the box was oriented to the previous substep's pose — or to
+                // a different sub-level entirely — making entities catch on walls and doorframes of
+                // rotated sub-levels. The custom-orientation composition matches
+                // transformEntityBoundingBox (premul); the up-direction and bounds-center handling
+                // it also performs depends only on the custom orientation, not the yaw, so it does
+                // not need to be redone here.
+                sink.entityBoxOrientation.identity().rotateY(getHitBoxYaw(subLevelPose));
+                if (customEntityOrientation != null) {
+                    sink.entityBoxOrientation.premul(customEntityOrientation);
+                }
+                entityBoundsOBB.setOrientation(sink.entityBoxOrientation);
+
                 rotatedContextBounds.set(fullContextBounds);
                 if (customEntityOrientation != null) {
                     entityBoundsOBB.vertices(sink.a);
