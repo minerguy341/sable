@@ -33,6 +33,36 @@ public abstract class LivingEntityMixin extends Entity{
         super(entityType, level);
     }
 
+    @WrapOperation(method = "travel", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/LivingEntity;getGravity()D"))
+    private double sable$noGravityOnTiltedGround(final LivingEntity instance, final Operation<Double> original) {
+        final double gravity = original.call(instance);
+
+        // Grounded on a tilted surface, world-frame gravity leaves a tangential remainder every
+        // tick (~g*sin(tilt)) that reads as a permanent downhill pull — but simply not applying
+        // gravity breaks contact: the constant press into the floor is what keeps ground detection
+        // engaged (without it the entity's motion decays to zero, contact is lost, and it enters a
+        // fall-catch-slide cycle). Instead, aim the press along the surface normal: contact stays
+        // engaged every tick and the ground resolution absorbs the press exactly, with no
+        // tangential slide. Rising jump ticks keep plain world gravity.
+        final Quaterniondc orientation;
+        if (instance.onGround()
+                && (orientation = EntitySubLevelUtil.getCustomEntityOrientation(instance, 1.0f)) != null) {
+            final Vector3d up = orientation.transform(OrientedBoundingBox3d.UP, new Vector3d());
+            final Vec3 movement = instance.getDeltaMovement();
+
+            // Distinguish standing/walking from a rising jump by the velocity component along the
+            // SURFACE normal, not world Y: walking uphill has positive world-Y but stays in the
+            // surface plane, and treating it as a jump starves the contact press for a tick,
+            // letting world gravity stutter in.
+            if (up.dot(movement.x, movement.y, movement.z) <= 0.01) {
+                instance.setDeltaMovement(movement.subtract(up.x * gravity, up.y * gravity, up.z * gravity));
+                return 0.0;
+            }
+        }
+
+        return gravity;
+    }
+
     @Inject(method = "jumpFromGround", at = @At("HEAD"), cancellable = true)
     public void sable$jumpFromGround(final CallbackInfo ci) {
         final Quaterniondc orientation = EntitySubLevelUtil.getCustomEntityOrientation(this, 1.0f);

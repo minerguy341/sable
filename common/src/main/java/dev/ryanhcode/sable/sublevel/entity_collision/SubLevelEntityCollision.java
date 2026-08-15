@@ -255,7 +255,19 @@ public class SubLevelEntityCollision {
                     sink.trackingPosition.set(entityBoundsCenter).add(feetOffset);
                     subLevelPose.transformPosition(lastSubLevelPose.transformPositionInverse(sink.trackingPosition)).sub(feetOffset, entityBoundsCenter);
                     entityBoundsCenter.add(collisionMotion, entityBoundsOBB.getPosition());
-                    entityBoundsCenter.fma(verticalAnchorPosition - entity.getBoundingBox().getYsize() / 2.0, entityUp, sink.tempEyePosition).sub(0.0, verticalAnchorPosition, 0.0);
+
+                    // Reconstruct the entity position as the exact inverse of how entityBoundsCenter
+                    // was derived from it (getAABBCenter + transformEntityBoundsCenter). The previous
+                    // reconstruction subtracted half the body height along entityUp instead, which for
+                    // custom orientations displaces the entity laterally by ~eyeHeight * sin(tilt)
+                    // EVERY tick — a phantom conveyor on any tilted surface.
+                    sink.tempEyePosition.set(entityBoundsCenter);
+                    if (customEntityOrientation != null) {
+                        final double eyeLever = entity.getEyeHeight() - entity.getBoundingBox().getYsize() / 2.0;
+                        sink.tempEyePosition.sub(0.0, eyeLever, 0.0)
+                                .add(customEntityOrientation.transform(new Vector3d(0.0, eyeLever, 0.0)));
+                    }
+                    sink.tempEyePosition.sub(0.0, entity.getBoundingBox().getYsize() / 2.0, 0.0);
                     ((EntityExtension) entity).sable$setPosSuperRaw(new Vec3(sink.tempEyePosition.x, sink.tempEyePosition.y, sink.tempEyePosition.z));
 
                     boolean anySurroundingBlocksSolid = false;
