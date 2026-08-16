@@ -11,6 +11,7 @@ import dev.ryanhcode.sable.sublevel.SubLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.Pose;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.AABB;
@@ -22,6 +23,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
  * Fixes the bounding box used for touching nearby entities when riding an entity mounted to a sub-level
@@ -31,6 +33,18 @@ public abstract class PlayerMixin extends LivingEntity {
 
     protected PlayerMixin(final EntityType<? extends LivingEntity> entityType, final Level level) {
         super(entityType, level);
+    }
+
+    @Inject(method = "canPlayerFitWithinBlocksAndEntitiesWhen", at = @At("HEAD"), cancellable = true)
+    private void sable$fitWhenSurfaceOriented(final Pose pose, final CallbackInfoReturnable<Boolean> cir) {
+        // The pose system tests the upright, world-aligned vanilla box; on a tilted sub-level the
+        // player's real collision box is tilted with the surface and clears geometry the upright
+        // box cannot, so this check spuriously forces the crawling/swimming pose. Physical
+        // obstruction is still enforced by the oriented collision — skip the pose demotion while
+        // surface-oriented.
+        if (EntitySubLevelUtil.getCustomEntityOrientation(this, 1.0f) != null) {
+            cir.setReturnValue(true);
+        }
     }
 
     @Inject(method = "travel", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/player/Player;getDeltaMovement()Lnet/minecraft/world/phys/Vec3;", ordinal = 1))
